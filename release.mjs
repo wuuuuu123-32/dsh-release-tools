@@ -39,6 +39,7 @@ const HELP = `用法：
   --dry-run       只打印将要做什么，不写文件、不提交、不推送
   --no-changelog  不碰 CHANGELOG.md
   --no-release    只推代码，不建 GitHub Release
+  --repo <o/r>    远程仓库 owner/name；缺省从 origin 读，没有 origin 就按包名推断
   --force         忽略「该版本 tag 已存在」之类的软性阻拦
 `
 
@@ -71,13 +72,14 @@ function parseArgs(argv) {
   let sub = 'release'
   const rest = [...argv]
   if (rest[0] && known.includes(rest[0]) && !rest[0].startsWith('-')) sub = rest.shift()
-  const opts = { positional: [], bump: 'auto', notes: null, title: null, dryRun: false, changelog: true, release: true, force: false, depth: 1 }
+  const opts = { positional: [], bump: 'auto', notes: null, title: null, dryRun: false, changelog: true, release: true, force: false, depth: 1, repo: null }
   while (rest.length) {
     const a = rest.shift()
     if (a === '--bump') opts.bump = rest.shift()
     else if (a === '--notes') opts.notes = rest.shift()
     else if (a === '--title') opts.title = rest.shift()
     else if (a === '--depth') opts.depth = Number(rest.shift())
+    else if (a === '--repo') opts.repo = rest.shift()
     else if (a === '--dry-run' || a === '-n') opts.dryRun = true
     else if (a === '--no-changelog') opts.changelog = false
     else if (a === '--no-release') opts.release = false
@@ -156,16 +158,21 @@ function decideBump(subjects) {
 }
 
 // ---------- 凭据 ----------
+let tokenSource = null
 function githubToken() {
-  for (const k of ['GITHUB_TOKEN', 'GH_TOKEN']) if (process.env[k]) return process.env[k].trim()
+  for (const k of ['GITHUB_TOKEN', 'GH_TOKEN']) if (process.env[k]) { tokenSource = '环境变量 ' + k; return process.env[k].trim() }
   const r = spawnSync('git', ['credential', 'fill'], {
     input: 'protocol=https\nhost=github.com\n\n',
     encoding: 'utf8',
     windowsHide: true,
     env: { ...process.env, GCM_INTERACTIVE: 'never' },
   })
-  if (r.status !== 0) return null
+  if (r.status !== 0) {
+    tokenSource = '读不到（' + (((r.stderr || '').trim().split('\n')[0]) || 'git credential fill 无输出') + '）'
+    return null
+  }
   const m = /^password=(.*)$/m.exec(r.stdout || '')
+  if (m) tokenSource = 'git credential fill'
   return m ? m[1].trim() : null
 }
 const scrub = (s, token) => (token ? String(s).split(token).join('***') : String(s))
@@ -222,6 +229,49 @@ async function createRelease({ owner, repo, tag, title, body, token }) {
   const text = await res.text()
   if (!res.ok) throw new Error(`GitHub Release 创建失败（HTTP ${res.status}）：${text.slice(0, 300)}`)
   return JSON.parse(text)
+}
+
+// ---------- 远程仓库解析 ----------
+async function apiGet(path, token) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'user-agent': 'dsh-release-tools' },
+  })
+  if (!res.ok) { warn(`GitHub API ${path} 返回 ${res.status}`); return null }
+  return res.json()
+}
+
+/**
+ * 确定推到哪个仓库。优先级：--repo 显式指定 → 现有 origin → 按 package.json 的 name 推断。
+ * 只有在完全没有 origin 时才会 git remote add origin（https 形式，不带 token）。
+ */
+async function resolveRepo(dir, repo, token, explicit) {
+  if (explicit) {
+    const [owner, name] = String(explicit).split('/')
+    if (!owner || !name) throw new Error('--repo 的格式应为 owner/name')
+    const url = `https://github.com/${owner}/${name}.git`
+    if (!repo?.owner) { git(['remote', 'add', 'origin', url], dir); say(`√ 已添加 origin ${url}`) }
+    return { owner, repo: name, url }
+  }
+  if (repo?.owner) return repo
+  if (!token) {
+    warn('没有 origin，也拿不到 GitHub 凭据，推不上去；用 --repo <owner/name> 指定')
+    return repo
+  }
+  const pkg = readPkg(dir)
+  const name = pkg?.data?.name
+  if (!name || name.includes('/')) {
+    warn('没有 origin，也没有可用的包名；用 --repo <owner/name> 指定')
+    return repo
+  }
+  const me = await apiGet('/user', token)
+  if (!me?.login) {
+    warn('拿到凭据了，但调 GitHub API /user 没通过；用 --repo <owner/name> 试试')
+    return repo
+  }
+  const url = `https://github.com/${me.login}/${name}.git`
+  git(['remote', 'add', 'origin', url], dir)
+  say(`√ 这个仓库还没有 origin，已按包名添加 ${url}`)
+  return { owner: me.login, repo: name, url }
 }
 
 // ---------- 主流程：release ----------
@@ -285,9 +335,11 @@ async function doRelease(opts) {
   const sha = out(git(['rev-parse', 'HEAD'], dir))
   // 3) 推送
   const token = githubToken()
+  say(`${C.dim}凭据${C.off} ${tokenSource ?? '（没有）'}`)
+  const remote = await resolveRepo(dir, repo, token, opts.repo)
   let pushOk = false
-  if (repo?.owner && token) {
-    const url = `https://x-access-token:${token}@github.com/${repo.owner}/${repo.repo}.git`
+  if (remote?.owner && token) {
+    const url = `https://x-access-token:${token}@github.com/${remote.owner}/${remote.repo}.git`
     const r1 = run('git', ['push', url, `HEAD:refs/heads/${branch}`], { cwd: dir, allowFail: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
     if (ok(r1)) {
       const r2 = run('git', ['push', url, `${opts.force ? '+' : ''}refs/tags/${nextTag}`], { cwd: dir, allowFail: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } })
@@ -304,24 +356,24 @@ async function doRelease(opts) {
     if (!pushOk) warn('推送没成功。若在 bash 下运行，请改到 pwsh 里跑（GCM 凭据），或设置 GITHUB_TOKEN')
   }
   // 4) Release
-  if (opts.release && pushOk && repo?.owner) {
+  if (opts.release && pushOk && remote?.owner) {
     if (!token) { warn('拿不到 GitHub 凭据，跳过 Release；可在网页上手动建，或设置 GITHUB_TOKEN') }
     else {
       const body = changelogBodyFor(dir, nextVersion) ?? notes
       try {
-        const rel = await createRelease({ owner: repo.owner, repo: repo.repo, tag: nextTag, title, body, token })
+        const rel = await createRelease({ owner: remote.owner, repo: remote.repo, tag: nextTag, title, body, token })
         good(`Release 已建：${rel.html_url}`)
       } catch (e) {
         // tag 刚推上去时 API 偶发 422，重试一次
         try {
           await new Promise((r) => setTimeout(r, 2500))
-          const rel = await createRelease({ owner: repo.owner, repo: repo.repo, tag: nextTag, title, body, token })
+          const rel = await createRelease({ owner: remote.owner, repo: remote.repo, tag: nextTag, title, body, token })
           good(`Release 已建：${rel.html_url}`)
         } catch (e2) { bad('Release 创建失败：' + e2.message) }
       }
     }
   }
-  say(`\n${C.green}完成${C.off} ${repo?.owner ? `https://github.com/${repo.owner}/${repo.repo}` : ''} ${sha.slice(0, 7)} ${nextTag}`)
+  say(`\n${C.green}完成${C.off} ${remote?.owner ? `https://github.com/${remote.owner}/${remote.repo}/releases/tag/${nextTag}` : nextTag}`)
   return 0
 }
 
