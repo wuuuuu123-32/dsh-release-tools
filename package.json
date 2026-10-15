@@ -1,0 +1,15 @@
+{
+  "name": "dsh-release-tools",
+  "version": "0.1.0",
+  "description": "一条命令完成一次发布：bump 版本 → 写 CHANGELOG → 提交 → 打 tag → push → 建 GitHub Release；另带 pre-push 钩子防止「改了代码忘了 bump 版本」。",
+  "type": "module",
+  "license": "MIT",
+  "author": "wuuuuu123-32",
+  "repository": { "type": "git", "url": "git+https://github.com/wuuuuu123-32/dsh-release-tools.git" },
+  "homepage": "https://github.com/wuuuuu123-32/dsh-release-tools#readme",
+  "bugs": { "url": "https://github.com/wuuuuu123-32/dsh-release-tools/issues" },
+  "bin": { "dsh-release": "./release.mjs" },
+  "files": ["release.mjs", "hooks/", "README.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "keywords": ["release", "version", "github", "changelog", "dsh"]
+}
