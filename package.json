@@ -1,6 +1,6 @@
 {
   "name": "dsh-release-tools",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "一条命令完成一次发布：bump 版本 → 写 CHANGELOG → 提交 → 打 tag → push → 建 GitHub Release；另带 pre-push 钩子防止「改了代码忘了 bump 版本」。",
   "type": "module",
   "license": "MIT",

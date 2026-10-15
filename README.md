@@ -32,6 +32,9 @@ node release.mjs . --notes "修复了退出时崩溃" --title "稳定性修复"
 
 # 只推代码，不建 Release / 不写 CHANGELOG
 node release.mjs --no-release --no-changelog
+
+# 仓库还没有 origin 时，显式指定推到哪儿
+node release.mjs . --repo wuuuuu123-32/my-plugin
 ```
 
 版本号怎么定（`--bump auto`，默认）：
@@ -63,6 +66,18 @@ token 只用于拼一次性的推送 URL 和调 GitHub API —— **不写进 re
 > Windows 上请在 **PowerShell** 里运行。在 bash / Git Bash 下，GCM 拿不到凭据，
 > 会报 `could not read Username for 'https://github.com'`。
 
+实测 `git credential fill` 并非处处可用（这台机器上 GCM 不在 PATH，会报
+`fatal: Cannot prompt because user interactivity has been disabled.`）。凭据本身还躺在
+Windows 凭据管理器里，可以绕过 git 直接读：
+
+```powershell
+$env:GITHUB_TOKEN = & tools/get-github-token.ps1
+node release.mjs .
+```
+
+`tools/get-github-token.ps1` 读 `git:https://github.com` 这条凭据并输出 token；它只在你显式运行时读一次，
+不缓存、不落盘。（脚本是纯 ASCII —— 含 BOM 的 .ps1 会让 Windows PowerShell 5.1 解析出错。）
+
 ## 子命令一览
 
 | 命令 | 作用 |
@@ -72,7 +87,7 @@ token 只用于拼一次性的推送 URL 和调 GitHub API —— **不写进 re
 | `scan <根目录> [--depth N]` | 扫出下面的 git 仓库，逐个 check |
 | `hooks install\|uninstall [目录...]` | 装 / 卸 pre-push 钩子 |
 
-选项：`--bump <kind>` `--notes <文本>` `--title <文本>` `--dry-run` `--no-changelog` `--no-release` `--force` `--depth <N>`
+选项：`--bump <kind>` `--notes <文本>` `--title <文本>` `--repo <owner/name>` `--dry-run` `--no-changelog` `--no-release` `--force` `--depth <N>`
 
 退出码：0 成功 / 1 有问题（check 发现未发布改动，或发布失败）/ 2 参数或前置条件错误。
 

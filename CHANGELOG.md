@@ -1,5 +1,9 @@
 # 更新日志
 
+## v0.1.1 — 2026-10-15
+
+- 新增 tools/get-github-token.ps1：绕过失效的 git credential fill，直接从 Windows 凭据管理器读 token。README 补充 --repo 说明。
+
 本文件由 release.mjs 维护。
 
 ## v0.1.0 — 2026-10-15
