@@ -9,7 +9,7 @@
   "homepage": "https://github.com/wuuuuu123-32/dsh-release-tools#readme",
   "bugs": { "url": "https://github.com/wuuuuu123-32/dsh-release-tools/issues" },
   "bin": { "dsh-release": "./release.mjs" },
-  "files": ["release.mjs", "hooks/", "README.md", "LICENSE"],
-  "engines": { "node": ">=20" },
+  "files": ["release.mjs", "hooks/", "tools/", "README.md", "LICENSE"],
+  "engines": { "node": ">=18" },
   "keywords": ["release", "version", "github", "changelog", "dsh"]
 }

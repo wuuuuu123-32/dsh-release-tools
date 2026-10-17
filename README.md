@@ -8,7 +8,7 @@ node release.mjs          # 发布当前项目
 node release.mjs --dry-run # 先空跑看看
 ```
 
-零依赖，只要 Node 18+ 和 git。
+零依赖，需要 Node 18+ 和 git；Node 18 提供了调用 GitHub API 所需的内置 `fetch`。
 
 ## 为什么需要它
 

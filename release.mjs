@@ -12,7 +12,7 @@
  * release 做的事：
  *   1. 读 package.json 版本与最新 git tag，算出下一个版本号（auto 时看 commit 前缀：feat→minor，feat!/BREAKING→major，其余→patch）
  *   2. 改 package.json 的 version，往 CHANGELOG.md 插入一节
- *   3. git add -A → commit「发布 vX.Y.Z」→ 打 tag vX.Y.Z
+ *   3. 暂存 package.json / CHANGELOG.md → commit「发布 vX.Y.Z」→ 打 tag vX.Y.Z
  *   4. push 分支与 tag（优先 GCM 凭据；不行则用 token 拼 URL，始终不改动 remote 配置）
  *   5. 调 GitHub API 建 Release，说明取 CHANGELOG 里刚写入的那一节
  *
@@ -23,7 +23,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
-import { join, resolve, basename } from 'node:path'
+import { join, resolve, basename, relative } from 'node:path'
 
 const HELP = `用法：
   node release.mjs [目录] [--bump patch|minor|major|auto] [--notes "要点"] [--title "标题"]
@@ -314,20 +314,26 @@ async function doRelease(opts) {
   }
 
   // 1) 版本号 + CHANGELOG
+  const releasePaths = []
   if (pkg && pkg.data.version !== nextVersion) {
     writeVersion(pkg.path, nextVersion)
+    releasePaths.push(pkg.path)
     say(`√ 已改 ${basename(pkg.path)} → ${nextVersion}`)
   }
   if (opts.changelog) {
     const section = changelogSection(nextVersion, date, notes)
     const p = updateChangelog(dir, section, false)
+    releasePaths.push(p)
     say(`√ 已更新 ${basename(p)}`)
   }
   // 2) 提交 + tag
-  const dirty = dirtyFiles(dir)
-  if (dirty.length === 0 && subjects.length === 0) { warn('没有任何改动，也没有新 commit，无需发布'); return 1 }
-  git(['add', '-A'], dir)
-  git(['commit', '-m', `发布 ${nextTag}`, '-m', notes], dir)
+  const paths = releasePaths.map((p) => relative(dir, p))
+  if (paths.length) git(['add', '--', ...paths], dir)
+  if (!paths.length || ok(git(['diff', '--cached', '--quiet', '--', ...paths], dir, true))) {
+    warn('没有发布文件改动，无需发布')
+    return 1
+  }
+  git(['commit', '--only', '-m', `发布 ${nextTag}`, '-m', notes, '--', ...paths], dir)
   say(`√ 已提交 发布 ${nextTag}`)
   const tagExists = ok(git(['tag', '-l', nextTag], dir, true)) && out(git(['tag', '-l', nextTag], dir, true)) === nextTag
   git(tagExists ? ['tag', '-f', nextTag] : ['tag', nextTag], dir)
